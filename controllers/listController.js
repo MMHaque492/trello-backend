@@ -1,36 +1,50 @@
-const db = require('../config/db');
+const List = require('../models/ListModel');
+const Board = require('../models/BoardModel');
 
-const getLists = (req, res) => {
-    const { boardId } = req.params;
-    
-    // Complex Query to get Lists and their Cards together
-    const sql = `
-        SELECT l.id as listId, l.title as listTitle, 
-               c.id as cardId, c.title as cardTitle
-        FROM lists l
-        LEFT JOIN cards c ON l.id = c.list_id
-        WHERE l.board_id = ?
-        ORDER BY l.position, c.position
-    `;
+exports.createList = async (req, res) => {
+  try {
+    const { title, boardId } = req.body;
+    const board = await Board.findByPk(boardId);
+    if (!board) return res.status(404).json({ msg: 'Board not found' });
+    const isMember = await board.hasMember(req.user.id);
+    if (!isMember) return res.status(401).json({ msg: 'Not authorized' });
 
-    db.query(sql, [boardId], (err, results) => {
-        if (err) return res.status(500).json(err);
-        
-        // Data Formatting: Group cards inside lists
-        const formattedData = results.reduce((acc, row) => {
-            let list = acc.find(l => l.id === row.listId);
-            if (!list) {
-                list = { id: row.listId, title: row.listTitle, cards: [] };
-                acc.push(list);
-            }
-            if (row.cardId) {
-                list.cards.push({ id: row.cardId, title: row.cardTitle });
-            }
-            return acc;
-        }, []);
-
-        res.json(formattedData);
-    });
+    const listsCount = await List.count({ where: { boardId } });
+    const list = await List.create({ title, boardId, position: listsCount });
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
 };
 
-module.exports = { getLists };
+exports.getListsByBoard = async (req, res) => {
+  try {
+    const lists = await List.findAll({
+      where: { boardId: req.params.boardId },
+      order: [['position', 'ASC']]
+    });
+    res.json(lists);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+exports.updateList = async (req, res) => {
+  try {
+    const list = await List.findByPk(req.params.id);
+    if (!list) return res.status(404).json({ msg: 'List not found' });
+    await list.update({ title: req.body.title, position: req.body.position });
+    res.json(list);
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
+
+exports.deleteList = async (req, res) => {
+  try {
+    await List.destroy({ where: { id: req.params.id } });
+    res.json({ msg: 'List deleted' });
+  } catch (err) {
+    res.status(500).json({ msg: err.message });
+  }
+};
